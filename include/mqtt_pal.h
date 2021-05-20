@@ -92,14 +92,17 @@ extern "C" {
     #ifndef MQTT_USE_CUSTOM_SOCKET_HANDLE
         #ifdef MQTT_USE_MBEDTLS
             struct mbedtls_ssl_context;
-            typedef struct mbedtls_ssl_context *mqtt_pal_socket_handle;
-        #elif defined(MQTT_USE_WOLFSSL)
+            typedef struct mbedtls_ssl_context *mqtt_pal_mbedtls_socket_handle;
+        #endif
+	#if defined(MQTT_USE_WOLFSSL)
             #include <wolfssl/ssl.h>
-            typedef WOLFSSL* mqtt_pal_socket_handle;
-        #elif defined(MQTT_USE_BIO)
+            typedef WOLFSSL* mqtt_pal_wolfssl_socket_handle;
+        #endif
+        #if defined(MQTT_USE_BIO)
             #include <openssl/bio.h>
-            typedef BIO* mqtt_pal_socket_handle;
-        #elif defined(MQTT_USE_BEARSSL)
+            typedef BIO* mqtt_pal_bio_socket_handle;
+        #endif
+	#if defined(MQTT_USE_BEARSSL)
             #include <bearssl.h>
 
             typedef struct _bearssl_context {
@@ -113,9 +116,44 @@ extern "C" {
                 int (*low_write)(void *write_context, const unsigned char *buf, size_t len);
             } bearssl_context;
 
-            typedef bearssl_context* mqtt_pal_socket_handle;
-        #else
-            typedef int mqtt_pal_socket_handle;
+            typedef bearssl_context* mqtt_pal_bearssl_socket_handle;
+	#endif
+	#if defined(USE_MULTI_PROTOCOL)
+	    union mqtt_pal_multi_socket_handle {
+	    #ifdef MQTT_USE_MBEDTLS
+	        mqtt_pal_mbedtls_socket_handle mbedtls;
+	    #endif
+	    #if defined(MQTT_USE_WOLFSSL)
+		mqtt_pal_wolfssl_socket_handle wolfssl;
+	    #endif
+	    #if defined(MQTT_USE_BIO)
+                mqtt_pal_bio_socket_handle bio;
+            #endif
+            #if defined(MQTT_USE_BEARSSL)
+                mqtt_pal_bearssl_socket_handle bearssl;
+            #endif
+	    #if defined(__unix__) || defined(__APPLE__) || defined(__NuttX__)
+                mqtt_pal_tcp_socket_handle tcp;
+	    #endif
+	    }
+            typedef struct {
+                int type;
+		union mqtt_pal_multi_socket_handle impl;
+	    } mqtt_pal_socket_handle;
+	#else
+            #ifdef MQTT_USE_MBEDTLS
+                typedef mqtt_pal_mbedtls_socket_handle mqtt_pal_socket_handle;
+            #elif defined(MQTT_USE_WOLFSSL)
+                typedef mqtt_pal_wolfssl_socket_handle mqtt_pal_socket_handle;
+            #elif defined(MQTT_USE_BIO)
+                typedef mqtt_pal_bio_socket_handle mqtt_pal_socket_handle;
+            #elif defined(MQTT_USE_BEARSSL)
+                typedef mqtt_pal_bearssl_socket_handle mqtt_pal_socket_handle;
+            #elif defined(__unix__) || defined(__APPLE__) || defined(__NuttX__)
+                typedef mqtt_pal_tcp_socket_handle mqtt_pal_socket_handle;
+            #else
+            #error No PAL!
+            #endif
         #endif
     #endif
 #elif defined(_MSC_VER)
