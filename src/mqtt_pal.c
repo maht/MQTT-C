@@ -35,7 +35,7 @@ SOFTWARE.
 #ifdef MQTT_USE_MBEDTLS
 #include <mbedtls/ssl.h>
 
-ssize_t mqtt_pal_sendall(mqtt_pal_socket_handle fd, const void* buf, size_t len, int flags) {
+ssize_t mqtt_pal_mbedtls_sendall(mqtt_pal_mbedtls_socket_handle fd, const void* buf, size_t len, int flags) {
     size_t sent = 0;
     while(sent < len) {
         int rv = mbedtls_ssl_write(fd, buf + sent, len - sent);
@@ -59,7 +59,7 @@ ssize_t mqtt_pal_sendall(mqtt_pal_socket_handle fd, const void* buf, size_t len,
     return sent;
 }
 
-ssize_t mqtt_pal_recvall(mqtt_pal_socket_handle fd, void* buf, size_t bufsz, int flags) {
+ssize_t mqtt_pal_mbedtls_recvall(mqtt_pal_mbedtls_socket_handle fd, void* buf, size_t bufsz, int flags) {
     const void *const start = buf;
     int rv;
     do {
@@ -98,8 +98,9 @@ ssize_t mqtt_pal_recvall(mqtt_pal_socket_handle fd, void* buf, size_t bufsz, int
 
     return buf - start;
 }
+#endif
 
-#elif defined(MQTT_USE_WOLFSSL)
+#if defined(MQTT_USE_WOLFSSL)
 #include <wolfssl/ssl.h>
 
 ssize_t mqtt_pal_sendall(mqtt_pal_socket_handle fd, const void* buf, size_t len, int flags) {
@@ -137,7 +138,9 @@ ssize_t mqtt_pal_recvall(mqtt_pal_socket_handle fd, void* buf, size_t bufsz, int
     return (ssize_t)(buf - start);
 }
 
-#elif defined(MQTT_USE_BEARSSL)
+#endif
+
+#if defined(MQTT_USE_BEARSSL)
 #include <bearssl.h>
 #include <memory.h>
 
@@ -266,7 +269,9 @@ ssize_t mqtt_pal_recvall(mqtt_pal_socket_handle fd, void* buf, size_t bufsz, int
     return bufsz - remaining_bytes;
 }
 
-#elif defined(MQTT_USE_BIO)
+#endif
+
+#if defined(MQTT_USE_BIO)
 #include <openssl/bio.h>
 #include <openssl/ssl.h>
 #include <openssl/err.h>
@@ -304,11 +309,15 @@ ssize_t mqtt_pal_recvall(mqtt_pal_socket_handle fd, void* buf, size_t bufsz, int
     return (ssize_t)(bufptr - start);
 }
 
-#elif defined(__unix__) || defined(__APPLE__) || defined(__NuttX__)
+#endif
+
+#if defined(__unix__) || defined(__APPLE__) || defined(__NuttX__)
 
 #include <errno.h>
 
-ssize_t mqtt_pal_sendall(mqtt_pal_socket_handle fd, const void* buf, size_t len, int flags) {
+#define PAL_PROTOCOL_ID tcp
+
+ssize_t mqtt_pal_tcp_sendall(mqtt_pal_tcp_socket_handle fd, const void* buf, size_t len, int flags) {
     size_t sent = 0;
     while(sent < len) {
         ssize_t tmp = send(fd, buf + sent, len - sent, flags);
@@ -323,7 +332,7 @@ ssize_t mqtt_pal_sendall(mqtt_pal_socket_handle fd, const void* buf, size_t len,
     return sent;
 }
 
-ssize_t mqtt_pal_recvall(mqtt_pal_socket_handle fd, void* buf, size_t bufsz, int flags) {
+ssize_t mqtt_pal_tcp_recvall(mqtt_pal_tcp_socket_handle fd, void* buf, size_t bufsz, int flags) {
     const void *const start = buf;
     ssize_t rv;
     do {
@@ -341,7 +350,9 @@ ssize_t mqtt_pal_recvall(mqtt_pal_socket_handle fd, void* buf, size_t bufsz, int
     return buf - start;
 }
 
-#elif defined(_MSC_VER)
+#endif
+
+#if defined(_MSC_VER)
 
 #include <errno.h>
 
@@ -378,9 +389,62 @@ ssize_t mqtt_pal_recvall(mqtt_pal_socket_handle fd, void* buf, size_t bufsz, int
     return (ssize_t)((char*)buf - start);
 }
 
+#if defined(MQTT_USE_MULTIPROTOCOL)
+
+/* TODO: replace this ifdefs by an array of callbacks indexed by the fd->type */
+
+ssize_t mqtt_pal_sendall(mqtt_pal_socket_handle fd, const void* buf, size_t len, int flags) {
+    switch(fd->type) {
+#ifdef MQTT_USE_MBEDTLS
+    case MBEDTLS:
+        return mqtt_pal_mbedtls_sendall(fd.impl.mbedtls, buf, len, flags);
+#elif defined(__unix__) || defined(__APPLE__) || defined(__NuttX__)
+    case TCP:
+	return mqtt_pal_tcp_sendall(fd.impl.tcp, buf, len, flags);
+#endif
+    default:
+	assert(false);
+    }
+}
+
+ssize_t mqtt_pal_recvall(mqtt_pal_socket_handle fd, void* buf, size_t bufsz, int flags) {
+    switch(fd->type) {
+#ifdef MQTT_USE_MBEDTLS
+    case MBEDTLS:
+        return mqtt_pal_mbedtls_recvall(fd.impl.mbedtls, buf, len, flags);
+#elif defined(__unix__) || defined(__APPLE__) || defined(__NuttX__)
+    case TCP:
+        return mqtt_pal_tcp_recvall(fd.impl.tcp, buf, len, flags);
+#endif
+    default:
+        assert(false);
+    }
+}
+
+
 #else
 
-#error No PAL!
+/* TODO: replace this ifdefs by proper macro wizardry to just use the correct function name */
+
+ssize_t mqtt_pal_sendall(mqtt_pal_socket_handle fd, const void* buf, size_t len, int flags) {
+#ifdef MQTT_USE_MBEDTLS
+    return mqtt_pal_mbedtls_sendall(fd, buf, len, flags);
+#elif defined(__unix__) || defined(__APPLE__) || defined(__NuttX__)
+    return mqtt_pal_tcp_sendall(fd, buf, len, flags);
+#else
+#error
+#endif
+}
+
+ssize_t mqtt_pal_recvall(mqtt_pal_socket_handle fd, void* buf, size_t bufsz, int flags) {
+#ifdef MQTT_USE_MBEDTLS
+    return mqtt_pal_mbedtls_recvall(fd, buf, len, flags);
+#elif defined(__unix__) || defined(__APPLE__) || defined(__NuttX__)
+    return mqtt_pal_tcp_recvall(fd, buf, len, flags);
+#else
+#error
+#endif
+}
 
 #endif
 
